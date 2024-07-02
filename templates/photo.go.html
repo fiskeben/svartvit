@@ -1,0 +1,8 @@
+{{define "photo"}}
+<div class="photo">
+    <a href="{{.Path}}" target="_blank"><img src="{{.Path}}" alt="{{.Filename}}" class="image" /></a>
+    <p>{{.Filename}}</p>
+    <img hx-delete="/photo/{{.Filename}}" hx-target="closest .photo" src="https://icons.getbootstrap.com/assets/icons/trash.svg" alt="Delete photo" class="icon" />
+    <img hx-put="/photo/{{.Filename}}" hx-target="closest .photo" hx-swap="outerHTML" src="https://icons.getbootstrap.com/assets/icons/{{if .Disabled}}play-fill{{else}}pause-fill{{end}}.svg" alt="{{if .Disabled}}Enable{{else}}Disable{{end}} photo" class="icon" />
+</div>
+{{end}}

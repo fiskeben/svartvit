@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <script src="https://unpkg.com/htmx.org@2.0.0" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
+    <style>
+        #photos {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .photo {
+            margin: 1rem;
+            border: 1px solid #f0f0f0;
+        }
+
+        .image {
+            width: 12rem;
+            height: auto;
+        }
+
+        .icon {
+            width: 1rem;
+            height: 1.5rem;
+            margin: 0.5rem;
+            cursor: pointer;
+        }
+    </style>
+    <title>Photo Frame</title>
+</head>
+<body>
+<div id="main">
+    <header>
+        <h1>Photo Frame</h1>
+    </header>
+
+    <div id="upload-frame">
+        <p>Add a new photo to the frame:</p>
+        <form id="upload" hx-post="/upload" hx-encoding="multipart/form-data" hx-target="#upload-message">
+            <input type="file" name="photo" id="photo" />
+            <button type="submit">Upload</button>
+            <progress id='progress' value='0' max='100'></progress>
+        </form>
+        <script>
+            htmx.on('#upload', 'htmx:xhr:progress', function(evt) {
+                htmx.find('#progress').setAttribute('value', evt.detail.loaded/evt.detail.total * 100)
+            });
+        </script>
+        <div id="upload-message"></div>
+    </div>
+
+    <div id="photos">
+        {{range .Images}}
+            {{ template "photo" . }}
+        {{end}}
+    </div>
+
+    <footer>
+        It's a photo frame!
+    </footer>
+</div>
+</body>
+</html>
