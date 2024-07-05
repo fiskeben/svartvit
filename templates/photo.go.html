@@ -1,8 +1,11 @@
 {{define "photo"}}
-<div class="photo">
-    <a href="{{.Path}}" target="_blank"><img src="{{.Path}}" alt="{{.Filename}}" class="image" /></a>
-    <p>{{.Filename}}</p>
-    <img hx-delete="/photo/{{.Filename}}" hx-target="closest .photo" src="https://icons.getbootstrap.com/assets/icons/trash.svg" alt="Delete photo" class="icon" />
-    <img hx-put="/photo/{{.Filename}}" hx-target="closest .photo" hx-swap="outerHTML" src="https://icons.getbootstrap.com/assets/icons/{{if .Disabled}}play-fill{{else}}pause-fill{{end}}.svg" alt="{{if .Disabled}}Enable{{else}}Disable{{end}} photo" class="icon" />
+<div class="photo{{if .Disabled}} disabled{{end}}">
+    <a href="{{.Path}}" target="_blank"><img src="{{.Path}}" alt="{{.Name}}" class="image" /></a>
+    <p>{{.Name}}</p>
+    <div class="icons">
+        <img hx-delete="/photo/{{.Id}}" hx-target="closest .photo" hx-swap="outerHTML" src="https://icons.getbootstrap.com/assets/icons/trash.svg" alt="Delete photo" class="icon" />
+        <img hx-put="/photo/{{.Id}}/toggle" hx-target="closest .photo" hx-swap="outerHTML" src="https://icons.getbootstrap.com/assets/icons/{{if .Disabled}}play-fill{{else}}pause-fill{{end}}.svg" alt="{{if .Disabled}}Enable{{else}}Disable{{end}} photo" class="icon" />
+        <img hx-get="/photo/{{.Id}}/edit" hx-target="closest .photo" hx-swap="outerHTML" src="https://icons.getbootstrap.com/assets/icons/pencil-fill.svg" alt="edit photo" class="icon" />
+    </div>
 </div>
 {{end}}
