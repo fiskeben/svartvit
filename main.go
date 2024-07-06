@@ -10,11 +10,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 )
 
 var (
-	BuildTime    string
-	BuildVersion string
+	BuildTime        string
+	BuildVersion     string
+	workingDirectory = "photos"
+	databaseFile     = "database.json"
 )
 
 //go:embed templates/*.go.html
@@ -31,11 +34,14 @@ func init() {
 	default:
 		templateRoot = embeddedTemplateRoot
 	}
+}
 
-	_, err := os.Stat(imageFolder)
+func initializeStorage() {
+	photosDir := workingDirectory + "/photos"
+	_, err := os.Stat(photosDir)
 	if err != nil {
 		log.Printf("photos folder not found, creating it (error: %v)", err)
-		if err = os.Mkdir(imageFolder, 0755); err != nil {
+		if err = os.Mkdir(photosDir, 0755); err != nil {
 			log.Fatalf("failed to create photos folder: %v", err)
 		}
 	}
@@ -50,8 +56,6 @@ func init() {
 	log.Printf("photoframe initialized (build %s, version: %s)", BuildTime, BuildVersion)
 }
 
-const imageFolder = "photos"
-
 type IndexData struct {
 	Images []Image
 }
@@ -64,23 +68,41 @@ type Image struct {
 }
 
 func main() {
-	var port string
+	var port, dir string
 	flag.StringVar(&port, "port", "8080", "port to listen on")
+	flag.StringVar(&dir, "dir", "", "working directory, blank for cwd")
 	flag.Parse()
+
+	if dir != "" {
+		workingDirectory = dir
+		databaseFile = dir + "/" + databaseFile
+	}
+
+	initializeStorage()
 
 	s := http.NewServeMux()
 
-	s.HandleFunc("GET /reindex", indexExistingPhotosHandler)
-	s.HandleFunc("GET /", indexHandler)
-	s.HandleFunc("POST /upload", uploadHandler)
-	s.HandleFunc("DELETE /photo/{id}", deleteHandler)
-	s.HandleFunc("PUT /photo/{id}/toggle", toggleDisableHandler)
-	s.HandleFunc("GET /photo/{id}/edit", editPhotoHandler)
-	s.HandleFunc("GET /photo/{id}", getPhotoHandler)
-	s.HandleFunc("PUT /photo/{id}", savePhotoHandler)
+	requestLogger := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("%s %s", r.Method, r.URL)
+			h.ServeHTTP(w, r)
+		})
+	}
 
-	fs := http.FileServer(http.Dir(imageFolder))
-	s.Handle("GET /photos/", http.StripPrefix("/photos/", fs))
+	s.Handle("GET /", requestLogger(indexHandler()))
+	s.Handle("GET /reindex", requestLogger(indexExistingPhotosHandler()))
+	s.Handle("POST /upload", requestLogger(uploadHandler()))
+	s.Handle("GET /photo/{id}", requestLogger(getPhotoHandler()))
+	s.Handle("PUT /photo/{id}", requestLogger(savePhotoHandler()))
+	s.Handle("GET /photo/{id}/edit", requestLogger(editPhotoHandler()))
+	s.Handle("PUT /photo/{id}/toggle", requestLogger(toggleDisableHandler()))
+	s.Handle("DELETE /photo/{id}", requestLogger(deleteHandler()))
+
+	imageHandler := http.FileServer(http.Dir(path.Join(workingDirectory, "photos")))
+	s.Handle("GET /photos/", http.StripPrefix("/photos", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("serving file %s", r.URL.Path)
+		imageHandler.ServeHTTP(w, r)
+	})))
 
 	log.Printf("starting server on port %s", port)
 	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), s); err != nil {
@@ -88,278 +110,301 @@ func main() {
 	}
 }
 
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	allImages, err := read()
-	if err != nil {
-		log.Printf("failed to read images from database: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	images := make([]Image, 0, len(allImages))
-	for _, entry := range allImages {
-		images = append(images, Image{
-			Id:       entry.Id,
-			Name:     entry.Name,
-			Path:     imageFolder + "/" + entry.Filename,
-			Disabled: entry.Disabled,
-		})
-	}
-
-	t, err := template.ParseFS(templateRoot, "templates/index.go.html", "templates/photo.go.html")
-	if err != nil {
-		log.Printf("failed to parse template: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err = t.Execute(w, IndexData{Images: images}); err != nil {
-		log.Printf("failed to execute template: %v", err)
-	}
-}
-
-func uploadHandler(w http.ResponseWriter, r *http.Request) {
-	r.ParseMultipartForm(10 << 20)
-	file, handler, err := r.FormFile("photo")
-	if err != nil {
-		log.Printf("Error Retrieving the file: %v", err)
-		return
-	}
-
-	defer file.Close()
-	log.Printf("Uploaded File: %+v\n", handler.Filename)
-	log.Printf("File Size: %+v\n", handler.Size)
-	log.Printf("MIME Header: %+v\n", handler.Header)
-
-	destinationFilename := imageFolder + "/" + handler.Filename
-
-	dest, err := os.Create(destinationFilename)
-	if err != nil {
-		log.Printf("failed to create file '%s': %v", destinationFilename, err)
-		return
-	}
-
-	defer dest.Close()
-	i, err := io.Copy(dest, file)
-	if err != nil {
-		log.Printf("failed to copy file: %v", err)
-		return
-	}
-
-	log.Printf("Copied %d bytes to %s", i, destinationFilename)
-
-	allImages, err := read()
-	if err != nil {
-		log.Printf("failed to read images from database: %v", err)
-		return
-	}
-
-	allImages = append(allImages, newEntry(handler.Filename))
-
-	if err = write(allImages); err != nil {
-		log.Printf("failed to write images to database: %v", err)
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte("Image uploaded!"))
-}
-
-func deleteHandler(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
-
-	id := r.PathValue("id")
-	img, err := get(id)
-	if err != nil {
-		log.Printf("could not find image in database: %v", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	filename := imageFolder + "/" + img.Filename
-
-	_, err = os.Stat(filename)
-	if err != nil {
-		log.Printf("failed to open file '%s': %v", filename, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err = os.Remove(filename); err != nil {
-		log.Printf("failed to delete file '%s': %v", filename, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err = deleteImage(id); err != nil {
-		log.Printf("failed to delete image from database: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-}
-
-func toggleDisableHandler(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
-	id := r.PathValue("id")
-	img, err := get(id)
-	if err != nil {
-		log.Printf("could not find image in database: %v", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	img.Disabled = !img.Disabled
-	if err = save(img); err != nil {
-		log.Printf("failed to save image to database: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	image := Image{
-		Id:       img.Id,
-		Name:     img.Name,
-		Path:     imageFolder + "/" + img.Filename,
-		Disabled: img.Disabled,
-	}
-
-	log.Printf("Toggled disabled state for image '%s'", id)
-	w.Header().Add("Content-Type", "text/html")
-	t, err := template.ParseFS(templateRoot, "templates/photo.go.html")
-	if err != nil {
-		log.Printf("failed to parse template: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err = t.ExecuteTemplate(w, "photo", image); err != nil {
-		log.Printf("failed to execute template: %v", err)
-	}
-}
-
-func editPhotoHandler(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
-	id := r.PathValue("id")
-	img, err := get(id)
-	if err != nil {
-		log.Printf("could not find image in database: %v", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	image := Image{
-		Id:       img.Id,
-		Name:     img.Name,
-		Path:     imageFolder + "/" + img.Filename,
-		Disabled: img.Disabled,
-	}
-
-	w.Header().Add("Content-Type", "text/html")
-	t, err := template.ParseFS(templateRoot, "templates/edit.go.html")
-	if err != nil {
-		log.Printf("failed to parse template: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err = t.Execute(w, image); err != nil {
-		log.Printf("failed to execute template: %v", err)
-	}
-}
-
-func getPhotoHandler(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
-	id := r.PathValue("id")
-	img, err := get(id)
-	if err != nil {
-		log.Printf("could not find image in database: %v", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	image := Image{
-		Id:       img.Id,
-		Name:     img.Name,
-		Path:     imageFolder + "/" + img.Filename,
-		Disabled: img.Disabled,
-	}
-
-	w.Header().Add("Content-Type", "text/html")
-	t, err := template.ParseFS(templateRoot, "templates/photo.go.html")
-	if err != nil {
-		log.Printf("failed to parse template: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err = t.ExecuteTemplate(w, "photo", image); err != nil {
-		log.Printf("failed to execute template: %v", err)
-	}
-}
-
-func savePhotoHandler(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
-	id := r.PathValue("id")
-
-	img, err := get(id)
-	if err != nil {
-		log.Printf("could not find image in database: %v", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	img.Name = r.FormValue("name")
-	img.Disabled = r.FormValue("disabled") == "on"
-
-	if err = save(img); err != nil {
-		log.Printf("failed to save image to database: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("Updated image '%s'", id)
-
-	image := Image{
-		Id:       img.Id,
-		Name:     img.Name,
-		Path:     imageFolder + "/" + img.Filename,
-		Disabled: img.Disabled,
-	}
-
-	w.Header().Add("Content-Type", "text/html")
-	t, err := template.ParseFS(templateRoot, "templates/photo.go.html")
-	if err != nil {
-		log.Printf("failed to parse template: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err = t.ExecuteTemplate(w, "photo", image); err != nil {
-		log.Printf("failed to execute template: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-func indexExistingPhotosHandler(w http.ResponseWriter, r *http.Request) {
-	dir, err := os.ReadDir(imageFolder)
-	if err != nil {
-		log.Printf("failed to read directory: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	images := make([]Entry, 0, len(dir))
-	for _, entry := range dir {
-		if entry.IsDir() {
-			continue
+func indexHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		allImages, err := read()
+		if err != nil {
+			log.Printf("failed to read images from database: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		images = append(images, newEntry(entry.Name()))
-	}
 
-	if err = write(images); err != nil {
-		log.Printf("failed to write images to database: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+		images := make([]Image, 0, len(allImages))
+		for _, entry := range allImages {
+			images = append(images, Image{
+				Id:       entry.Id,
+				Name:     entry.Name,
+				Path:     "/photos/" + entry.Filename,
+				Disabled: entry.Disabled,
+			})
+		}
 
-	w.Header().Add("Location", "/")
-	w.WriteHeader(http.StatusMovedPermanently)
+		t, err := template.ParseFS(templateRoot, "templates/index.go.html", "templates/photo.go.html")
+		if err != nil {
+			log.Printf("failed to parse template: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err = t.Execute(w, IndexData{Images: images}); err != nil {
+			log.Printf("failed to execute template: %v", err)
+		}
+	}
+}
+
+func uploadHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.ParseMultipartForm(10 << 20)
+		file, handler, err := r.FormFile("photo")
+		if err != nil {
+			log.Printf("Error Retrieving the file: %v", err)
+			return
+		}
+
+		defer file.Close()
+		log.Printf("Uploaded File: %+v\n", handler.Filename)
+		log.Printf("File Size: %+v\n", handler.Size)
+		log.Printf("MIME Header: %+v\n", handler.Header)
+
+		destinationFilename := workingDirectory + "/photos/" + handler.Filename
+
+		dest, err := os.Create(destinationFilename)
+		if err != nil {
+			log.Printf("failed to create file '%s': %v", destinationFilename, err)
+			return
+		}
+
+		defer dest.Close()
+		i, err := io.Copy(dest, file)
+		if err != nil {
+			log.Printf("failed to copy file: %v", err)
+			return
+		}
+
+		log.Printf("Copied %d bytes to %s", i, destinationFilename)
+
+		allImages, err := read()
+		if err != nil {
+			log.Printf("failed to read images from database: %v", err)
+			return
+		}
+
+		allImages = append(allImages, newEntry(handler.Filename))
+
+		if err = write(allImages); err != nil {
+			log.Printf("failed to write images to database: %v", err)
+			return
+		}
+
+		w.Header().Add("Location", "/")
+		w.Header().Add("HX-Location", "/")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("Image uploaded!"))
+	}
+}
+
+func deleteHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+
+		id := r.PathValue("id")
+		img, err := get(id)
+		if err != nil {
+			log.Printf("could not find image in database: %v", err)
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		filename := workingDirectory + "/photos/" + img.Filename
+
+		_, err = os.Stat(filename)
+		if err != nil {
+			log.Printf("failed to open file '%s': %v", filename, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err = os.Remove(filename); err != nil {
+			log.Printf("failed to delete file '%s': %v", filename, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err = deleteImage(id); err != nil {
+			log.Printf("failed to delete image from database: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+func toggleDisableHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		id := r.PathValue("id")
+		img, err := get(id)
+		if err != nil {
+			log.Printf("could not find image in database: %v", err)
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		img.Disabled = !img.Disabled
+		if err = save(img); err != nil {
+			log.Printf("failed to save image to database: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		image := Image{
+			Id:       img.Id,
+			Name:     img.Name,
+			Path:     "/photos/" + img.Filename,
+			Disabled: img.Disabled,
+		}
+
+		log.Printf("Toggled disabled state for image '%s'", id)
+		w.Header().Add("Content-Type", "text/html")
+		t, err := template.ParseFS(templateRoot, "templates/photo.go.html")
+		if err != nil {
+			log.Printf("failed to parse template: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err = t.ExecuteTemplate(w, "photo", image); err != nil {
+			log.Printf("failed to execute template: %v", err)
+		}
+	}
+}
+
+func editPhotoHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		id := r.PathValue("id")
+		img, err := get(id)
+		if err != nil {
+			log.Printf("could not find image in database: %v", err)
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		image := Image{
+			Id:       img.Id,
+			Name:     img.Name,
+			Path:     "/photos/" + img.Filename,
+			Disabled: img.Disabled,
+		}
+
+		w.Header().Add("Content-Type", "text/html")
+		t, err := template.ParseFS(templateRoot, "templates/edit.go.html")
+		if err != nil {
+			log.Printf("failed to parse template: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err = t.Execute(w, image); err != nil {
+			log.Printf("failed to execute template: %v", err)
+		}
+	}
+}
+
+func getPhotoHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		id := r.PathValue("id")
+		img, err := get(id)
+		if err != nil {
+			log.Printf("could not find image in database: %v", err)
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		image := Image{
+			Id:       img.Id,
+			Name:     img.Name,
+			Path:     "/photos/" + img.Filename,
+			Disabled: img.Disabled,
+		}
+
+		w.Header().Add("Content-Type", "text/html")
+		t, err := template.ParseFS(templateRoot, "templates/photo.go.html")
+		if err != nil {
+			log.Printf("failed to parse template: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err = t.ExecuteTemplate(w, "photo", image); err != nil {
+			log.Printf("failed to execute template: %v", err)
+		}
+	}
+}
+
+func savePhotoHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		id := r.PathValue("id")
+
+		img, err := get(id)
+		if err != nil {
+			log.Printf("could not find image in database: %v", err)
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		img.Name = r.FormValue("name")
+		img.Disabled = r.FormValue("disabled") == "on"
+
+		if err = save(img); err != nil {
+			log.Printf("failed to save image to database: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Updated image '%s'", id)
+
+		image := Image{
+			Id:       img.Id,
+			Name:     img.Name,
+			Path:     "/photos/" + img.Filename,
+			Disabled: img.Disabled,
+		}
+
+		w.Header().Add("Content-Type", "text/html")
+		t, err := template.ParseFS(templateRoot, "templates/photo.go.html")
+		if err != nil {
+			log.Printf("failed to parse template: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err = t.ExecuteTemplate(w, "photo", image); err != nil {
+			log.Printf("failed to execute template: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
+}
+
+func indexExistingPhotosHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("reindexing existing photos in %s", workingDirectory)
+		dir, err := os.ReadDir(workingDirectory)
+		if err != nil {
+			log.Printf("failed to read directory: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		images := make([]Entry, 0, len(dir))
+		for _, entry := range dir {
+			if entry.IsDir() {
+				continue
+			}
+			img := newEntry(entry.Name())
+			images = append(images, img)
+			log.Printf("added image %#v", img)
+		}
+
+		log.Printf("%d images found, saving", len(images))
+
+		if err = write(images); err != nil {
+			log.Printf("failed to write images to database: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Add("Location", "/")
+		w.WriteHeader(http.StatusSeeOther)
+	}
 }

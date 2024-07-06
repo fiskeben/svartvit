@@ -11,8 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const databaseFile = "database.json"
-
 type Entry struct {
 	Id       string `json:"id"`
 	Name     string `json:"name"`
