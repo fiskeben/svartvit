@@ -1,16 +1,22 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"flag"
 	"fmt"
+	"html"
 	"html/template"
+	"image/png"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path"
+	"time"
+
+	"github.com/fiskeben/svartvit/internal/epd"
 )
 
 var (
@@ -18,6 +24,7 @@ var (
 	BuildVersion     string
 	workingDirectory = "photos"
 	databaseFile     = "database.json"
+	currentImageFile = "/tmp/current.png"
 )
 
 //go:embed templates/*.go.html
@@ -53,7 +60,7 @@ func initializeStorage() {
 		}
 	}
 
-	log.Printf("photoframe initialized (build %s, version: %s)", BuildTime, BuildVersion)
+	log.Printf("svartvit initialized (build %s, version: %s)", BuildTime, BuildVersion)
 }
 
 type IndexData struct {
@@ -68,9 +75,19 @@ type Image struct {
 }
 
 func main() {
-	var port, dir string
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var port, dir, fontFile, overlay string
+	var interval time.Duration
+	var useDisplay bool
 	flag.StringVar(&port, "port", "8080", "port to listen on")
 	flag.StringVar(&dir, "dir", "", "working directory, blank for cwd")
+	flag.StringVar(&fontFile, "font", "font.ttf", "TrueType font used for the date label")
+	flag.StringVar(&currentImageFile, "current", currentImageFile, "where to write the image currently shown on the frame")
+	flag.DurationVar(&interval, "interval", time.Hour, "how often to change the image on the frame")
+	flag.StringVar(&overlay, "overlay", "date", "what to draw on top of the photo: "+overlayNames())
+	flag.BoolVar(&useDisplay, "epd", false, "show images on the e-Paper display (Raspberry Pi only)")
 	flag.Parse()
 
 	if dir != "" {
@@ -79,6 +96,26 @@ func main() {
 	}
 
 	initializeStorage()
+
+	if err := loadFont(fontFile); err != nil {
+		log.Fatalf("failed to load font '%s': %v", fontFile, err)
+	}
+
+	var ok bool
+	if currentOverlay, ok = overlays[overlay]; !ok {
+		log.Fatalf("unknown overlay '%s', use one of: %s", overlay, overlayNames())
+	}
+
+	if useDisplay {
+		d, closer, err := epd.Open()
+		if err != nil {
+			log.Fatalf("failed to open e-Paper display: %v", err)
+		}
+		defer closer.Close()
+		display = d
+	}
+
+	go updateImage(ctx, interval)
 
 	s := http.NewServeMux()
 
@@ -96,6 +133,9 @@ func main() {
 	s.Handle("PUT /photo/{id}", requestLogger(savePhotoHandler()))
 	s.Handle("GET /photo/{id}/edit", requestLogger(editPhotoHandler()))
 	s.Handle("PUT /photo/{id}/toggle", requestLogger(toggleDisableHandler()))
+	s.Handle("PUT /photo/{id}/set", requestLogger(setPhotoHandler()))
+	s.Handle("GET /photo/{id}/set/events", requestLogger(setPhotoEventsHandler()))
+	s.Handle("GET /photo/{id}/preview", requestLogger(previewHandler()))
 	s.Handle("DELETE /photo/{id}", requestLogger(deleteHandler()))
 
 	imageHandler := http.FileServer(http.Dir(path.Join(workingDirectory, "photos")))
@@ -406,5 +446,97 @@ func indexExistingPhotosHandler() http.HandlerFunc {
 
 		w.Header().Add("Location", "/")
 		w.WriteHeader(http.StatusSeeOther)
+	}
+}
+
+// writeEvent writes a single SSE event and flushes it to the client.
+func writeEvent(w io.Writer, event, data string) error {
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+		return err
+	}
+
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	return nil
+}
+
+// setPhotoHandler returns a fragment that connects to setPhotoEventsHandler,
+// which does the actual work and streams the output back.
+func setPhotoHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		img, err := get(id)
+		if err != nil {
+			log.Printf("could not find image in database: %v", err)
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		w.Header().Add("Content-Type", "text/html")
+		t, err := template.ParseFS(templateRoot, "templates/set.go.html")
+		if err != nil {
+			log.Printf("failed to parse template: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err = t.Execute(w, Image{Id: img.Id}); err != nil {
+			log.Printf("failed to execute template: %v", err)
+		}
+	}
+}
+
+// setPhotoEventsHandler shows the photo on the frame and streams progress as server-sent events.
+func setPhotoEventsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		img, err := get(id)
+		if err != nil {
+			log.Printf("could not find image in database: %v", err)
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+
+		progress := func(msg string) {
+			log.Print(msg)
+			writeEvent(w, "Progress", "<p>"+html.EscapeString(msg)+"</p>")
+		}
+
+		if err = showPhoto(workingDirectory+"/photos/"+img.Filename, progress); err != nil {
+			log.Printf("failed to show photo: %v", err)
+			progress("Error: " + err.Error())
+		}
+
+		writeEvent(w, "Done", "")
+	}
+}
+
+// previewHandler renders the photo as it would look on the frame, without updating the frame.
+func previewHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		img, err := get(id)
+		if err != nil {
+			log.Printf("could not find image in database: %v", err)
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		frame, err := renderFile(workingDirectory + "/photos/" + img.Filename)
+		if err != nil {
+			log.Printf("failed to render preview: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "image/png")
+		if err = png.Encode(w, frame); err != nil {
+			log.Printf("failed to encode preview: %v", err)
+		}
 	}
 }

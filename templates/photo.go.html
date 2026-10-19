@@ -6,6 +6,9 @@
         <img hx-delete="/photo/{{.Id}}" hx-target="closest .photo" hx-swap="outerHTML" src="https://icons.getbootstrap.com/assets/icons/trash.svg" alt="Delete photo" class="icon" />
         <img hx-put="/photo/{{.Id}}/toggle" hx-target="closest .photo" hx-swap="outerHTML" src="https://icons.getbootstrap.com/assets/icons/{{if .Disabled}}play-fill{{else}}pause-fill{{end}}.svg" alt="{{if .Disabled}}Enable{{else}}Disable{{end}} photo" class="icon" />
         <img hx-get="/photo/{{.Id}}/edit" hx-target="closest .photo" hx-swap="outerHTML" src="https://icons.getbootstrap.com/assets/icons/pencil-fill.svg" alt="edit photo" class="icon" />
+        <a href="/photo/{{.Id}}/preview" target="_blank"><img src="https://icons.getbootstrap.com/assets/icons/eye.svg" alt="Preview on frame" class="icon" /></a>
+        <img hx-put="/photo/{{.Id}}/set" hx-target="next .output" hx-swap="innerHTML" src="https://icons.getbootstrap.com/assets/icons/display.svg" alt="Show on frame" class="icon" />
     </div>
+    <div class="output"></div>
 </div>
 {{end}}

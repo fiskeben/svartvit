@@ -1,4 +1,8 @@
 .idea
 database.json
 photos
-photoframe*
+svartvit*
+.DS_Store
+testimage-*.png
+font.ttf
+testimages/
