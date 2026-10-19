@@ -25,7 +25,8 @@ const (
 // Open connects to the display through the Raspberry Pi's SPI port and GPIO pins.
 // The returned io.Closer releases the SPI port.
 func Open() (*Device, io.Closer, error) {
-	if _, err := host.Init(); err != nil {
+	state, err := host.Init()
+	if err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize host drivers: %w", err)
 	}
 
@@ -43,7 +44,13 @@ func Open() (*Device, io.Closer, error) {
 	reset, dc, busy := gpioreg.ByName(resetPin), gpioreg.ByName(dcPin), gpioreg.ByName(busyPin)
 	if reset == nil || dc == nil || busy == nil {
 		port.Close()
-		return nil, nil, errors.New("GPIO pins not found, is this a Raspberry Pi?")
+
+		// Drivers that fail to load don't make host.Init fail, so report them here.
+		failed := make([]error, 0, len(state.Failed))
+		for _, f := range state.Failed {
+			failed = append(failed, fmt.Errorf("%s: %w", f.D, f.Err))
+		}
+		return nil, nil, fmt.Errorf("GPIO pins not found, failed drivers: %w", errors.Join(failed...))
 	}
 
 	if err = busy.In(gpio.Float, gpio.NoEdge); err != nil {
