@@ -2,6 +2,7 @@ package epd
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"image/color"
 	"testing"
@@ -11,8 +12,12 @@ import (
 )
 
 // fakeBus records everything sent to the display, split into commands and data by the DC pin.
+// Like the real display, it holds the busy pin low for a few status polls after a refresh command.
 type fakeBus struct {
 	dc        *fakePin
+	busy      *fakePin
+	busyPolls int  // status polls left before the display is idle again
+	ignoring  bool // never become busy, like a display that doesn't receive anything
 	maxTxSeen int
 	sent      []transfer
 }
@@ -26,6 +31,14 @@ func (b *fakeBus) Tx(w, _ []byte) error {
 	b.maxTxSeen = max(b.maxTxSeen, len(w))
 	if b.dc.level == gpio.Low {
 		b.sent = append(b.sent, transfer{command: w[0]})
+		switch {
+		case w[0] == 0x12 && !b.ignoring: // refresh
+			b.busy.level, b.busyPolls = gpio.Low, 3
+		case w[0] == 0x71 && b.busyPolls > 0: // get status
+			if b.busyPolls--; b.busyPolls == 0 {
+				b.busy.level = gpio.High
+			}
+		}
 		return nil
 	}
 	last := &b.sent[len(b.sent)-1]
@@ -48,7 +61,7 @@ func (p *fakePin) Read() gpio.Level {
 
 func newFakeDevice() (*Device, *fakeBus, *fakePin) {
 	dc, busy := &fakePin{}, &fakePin{level: gpio.High}
-	bus := &fakeBus{dc: dc}
+	bus := &fakeBus{dc: dc, busy: busy}
 	d := New(bus, &fakePin{}, dc, busy)
 	d.sleep = func(time.Duration) {}
 	return d, bus, busy
@@ -137,5 +150,15 @@ func TestShow_busyTimeout(t *testing.T) {
 
 	if err := d.Show(image.NewGray(image.Rect(0, 0, Width, Height))); err == nil {
 		t.Fatal("expected an error when the display never becomes idle")
+	}
+}
+
+func TestShow_notResponding(t *testing.T) {
+	d, bus, _ := newFakeDevice()
+	bus.ignoring = true
+
+	err := d.Show(image.NewGray(image.Rect(0, 0, Width, Height)))
+	if !errors.Is(err, errNotResponding) {
+		t.Fatalf("got %v, want %v", err, errNotResponding)
 	}
 }

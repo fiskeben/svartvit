@@ -22,6 +22,9 @@ const (
 	bufferSize = Width * Height / 8
 )
 
+// errNotResponding means the display never reported being busy, so it most likely didn't receive any commands.
+var errNotResponding = errors.New("display didn't respond, check the wiring and that the SPI chip select pin is configured")
+
 // busyTimeout is how long to wait for the display to finish an operation before giving up.
 // A full refresh takes about 15-20 seconds.
 var busyTimeout = time.Minute
@@ -141,7 +144,7 @@ func (d *Device) init() error {
 	}
 
 	d.sleep(100 * time.Millisecond)
-	if err := d.waitUntilIdle(); err != nil {
+	if _, err := d.waitUntilIdle(); err != nil {
 		return err
 	}
 
@@ -208,7 +211,18 @@ func (d *Device) refresh(black []byte) error {
 	}
 
 	d.sleep(100 * time.Millisecond)
-	return d.waitUntilIdle()
+	wasBusy, err := d.waitUntilIdle()
+	if err != nil {
+		return err
+	}
+
+	// A refresh takes several seconds, so the display must still be busy after 100 ms.
+	// If it isn't, it never received the refresh command.
+	if !wasBusy {
+		return errNotResponding
+	}
+
+	return nil
 }
 
 func (d *Device) powerOff() error {
@@ -216,7 +230,7 @@ func (d *Device) powerOff() error {
 		return err
 	}
 
-	if err := d.waitUntilIdle(); err != nil {
+	if _, err := d.waitUntilIdle(); err != nil {
 		return err
 	}
 
@@ -230,24 +244,26 @@ func (d *Device) powerOff() error {
 }
 
 // waitUntilIdle polls the busy pin until the display is ready for the next command.
-func (d *Device) waitUntilIdle() error {
+// It reports whether the display was busy when it started polling.
+func (d *Device) waitUntilIdle() (wasBusy bool, err error) {
 	for waited := time.Duration(0); ; waited += 10 * time.Millisecond {
-		if err := d.send(0x71); err != nil { // get status, which updates the busy pin
-			return err
+		if err = d.send(0x71); err != nil { // get status, which updates the busy pin
+			return wasBusy, err
 		}
 
 		if d.busy.Read() == gpio.High {
 			break
 		}
+		wasBusy = true
 
 		if waited > busyTimeout {
-			return fmt.Errorf("display still busy after %s", busyTimeout)
+			return wasBusy, fmt.Errorf("display still busy after %s", busyTimeout)
 		}
 		d.sleep(10 * time.Millisecond)
 	}
 
 	d.sleep(200 * time.Millisecond)
-	return nil
+	return wasBusy, nil
 }
 
 // send sends a command followed by its data, if any.
