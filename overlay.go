@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -32,14 +33,9 @@ var overlays = map[string]Overlay{
 	"none": func(draw.Image, time.Time) error { return nil },
 }
 
-// overlayNames lists the available overlays, for use in the -overlay flag's help text.
-func overlayNames() string {
-	var names []string
-	for name := range overlays {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return strings.Join(names, ", ")
+// names lists the keys of m in order, for use in a flag's help text.
+func names[T any](m map[string]T) string {
+	return strings.Join(slices.Sorted(maps.Keys(m)), ", ")
 }
 
 // labelFont is the font used by overlays that draw text. It is loaded once at startup by loadFont.
@@ -60,25 +56,26 @@ func loadFont(filename string) error {
 	return nil
 }
 
-var months = map[time.Month]string{
-	time.January:   "januar",
-	time.February:  "februar",
-	time.March:     "mars",
-	time.April:     "april",
-	time.May:       "mai",
-	time.June:      "juni",
-	time.July:      "juli",
-	time.August:    "august",
-	time.September: "september",
-	time.October:   "oktober",
-	time.November:  "november",
-	time.December:  "desember",
+// dateFormats write a date the way it's written in each language, e.g. "29. desember" in Norwegian.
+// To add a language, add it here and run with -locale <name>.
+var dateFormats = map[string]func(time.Time) string{
+	"en": func(t time.Time) string { return t.Format("January 2") },
+	"nb": localDate("%d. %s", "januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "desember"),
+	"da": localDate("%d. %s", "januar", "februar", "marts", "april", "maj", "juni", "juli", "august", "september", "oktober", "november", "december"),
+	"sv": localDate("%d %s", "januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"),
+	"de": localDate("%d. %s", "Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"),
 }
 
-// dateString formats t as e.g. "29. desember".
-func dateString(t time.Time) string {
-	return fmt.Sprintf("%d. %s", t.Day(), months[t.Month()])
+// localDate returns a date format that uses the given month names, January first.
+// layout has a %d for the day followed by a %s for the month.
+func localDate(layout string, months ...string) func(time.Time) string {
+	return func(t time.Time) string {
+		return fmt.Sprintf(layout, t.Day(), months[t.Month()-1])
+	}
 }
+
+// dateString formats the date drawn by overlays. It is set with the -locale flag.
+var dateString = dateFormats["en"]
 
 // dateBox draws the date in black on a white box with a double border, in the bottom right corner.
 // The box is sized to fit the text.

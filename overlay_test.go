@@ -55,8 +55,26 @@ func requireFiles(t *testing.T, filenames ...string) {
 	}
 }
 
-func Test_dateString(t *testing.T) {
-	if got := dateString(time.Date(2024, time.December, 29, 0, 0, 0, 0, time.Local)); got != "29. desember" {
-		t.Errorf("got %q, want %q", got, "29. desember")
+func Test_dateFormats(t *testing.T) {
+	date := time.Date(2024, time.December, 29, 0, 0, 0, 0, time.Local)
+	want := map[string]string{
+		"en": "December 29",
+		"nb": "29. desember",
+		"da": "29. december",
+		"sv": "29 december",
+		"de": "29. Dezember",
+	}
+
+	for locale, format := range dateFormats {
+		t.Run(locale, func(t *testing.T) {
+			if got := format(date); got != want[locale] {
+				t.Errorf("got %q, want %q", got, want[locale])
+			}
+
+			// Every month has a name.
+			for m := time.January; m <= time.December; m++ {
+				format(time.Date(2024, m, 1, 0, 0, 0, 0, time.Local))
+			}
+		})
 	}
 }

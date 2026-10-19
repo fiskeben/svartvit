@@ -78,7 +78,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var port, dir, fontFile, overlay string
+	var port, dir, fontFile, overlay, locale string
 	var interval time.Duration
 	var useDisplay bool
 	flag.StringVar(&port, "port", "8080", "port to listen on")
@@ -86,7 +86,8 @@ func main() {
 	flag.StringVar(&fontFile, "font", "font.ttf", "TrueType font used for the date label")
 	flag.StringVar(&currentImageFile, "current", currentImageFile, "where to write the image currently shown on the frame")
 	flag.DurationVar(&interval, "interval", time.Hour, "how often to change the image on the frame")
-	flag.StringVar(&overlay, "overlay", "date", "what to draw on top of the photo: "+overlayNames())
+	flag.StringVar(&overlay, "overlay", "date", "what to draw on top of the photo: "+names(overlays))
+	flag.StringVar(&locale, "locale", "en", "language of the date: "+names(dateFormats))
 	flag.BoolVar(&useDisplay, "epd", false, "show images on the e-Paper display (Raspberry Pi only)")
 	flag.Parse()
 
@@ -103,7 +104,10 @@ func main() {
 
 	var ok bool
 	if currentOverlay, ok = overlays[overlay]; !ok {
-		log.Fatalf("unknown overlay '%s', use one of: %s", overlay, overlayNames())
+		log.Fatalf("unknown overlay '%s', use one of: %s", overlay, names(overlays))
+	}
+	if dateString, ok = dateFormats[locale]; !ok {
+		log.Fatalf("unknown locale '%s', use one of: %s", locale, names(dateFormats))
 	}
 
 	if useDisplay {

@@ -39,6 +39,7 @@ Leave out `-epd` to run without a display, for instance on your own computer. Ea
 | `-epd`      | off                | Show images on the e-Paper display (Raspberry Pi only)         |
 | `-interval` | `1h`               | How often to change the photo, e.g. `30m`                      |
 | `-overlay`  | `date`             | What to draw on top of the photo: `date` or `none`             |
+| `-locale`   | `en`               | Language of the date: `en`, `nb`, `da`, `sv` or `de`           |
 | `-current`  | `/tmp/current.png` | Where to write the image currently shown on the frame          |
 | `-port`     | `8080`             | Port the web app listens on                                    |
 
