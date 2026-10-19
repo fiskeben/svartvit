@@ -22,7 +22,7 @@ import (
 var (
 	BuildTime        string
 	BuildVersion     string
-	workingDirectory = "photos"
+	workingDirectory = "."
 	databaseFile     = "database.json"
 	currentImageFile = "/tmp/current.png"
 )
@@ -418,28 +418,8 @@ func savePhotoHandler() http.HandlerFunc {
 
 func indexExistingPhotosHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("reindexing existing photos in %s", workingDirectory)
-		dir, err := os.ReadDir(workingDirectory)
-		if err != nil {
-			log.Printf("failed to read directory: %v", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		images := make([]Entry, 0, len(dir))
-		for _, entry := range dir {
-			if entry.IsDir() {
-				continue
-			}
-			img := newEntry(entry.Name())
-			images = append(images, img)
-			log.Printf("added image %#v", img)
-		}
-
-		log.Printf("%d images found, saving", len(images))
-
-		if err = write(images); err != nil {
-			log.Printf("failed to write images to database: %v", err)
+		if err := reindex(workingDirectory + "/photos"); err != nil {
+			log.Printf("failed to reindex photos: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

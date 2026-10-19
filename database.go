@@ -97,6 +97,43 @@ func save(img Entry) error {
 	return write(allImages)
 }
 
+// reindex brings the database in line with the photos in dir: photos without an entry are added
+// and entries whose photo is gone are removed. Existing entries keep their name and disabled state.
+func reindex(dir string) error {
+	log.Printf("reindexing existing photos in %s", dir)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+
+	existing, err := read()
+	if err != nil {
+		return err
+	}
+
+	byFilename := make(map[string]Entry, len(existing))
+	for _, entry := range existing {
+		byFilename[entry.Filename] = entry
+	}
+
+	entries := make(Entries, 0, len(files))
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+
+		entry, ok := byFilename[f.Name()]
+		if !ok {
+			entry = newEntry(f.Name())
+			log.Printf("added image %#v", entry)
+		}
+		entries = append(entries, entry)
+	}
+
+	log.Printf("%d images found, saving", len(entries))
+	return write(entries)
+}
+
 func deleteImage(id string) error {
 	allImages, err := read()
 	if err != nil {
