@@ -14,6 +14,7 @@ import (
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/font"
+	"golang.org/x/image/math/fixed"
 )
 
 // An Overlay draws on top of the photo after it has been scaled and dithered for the frame.
@@ -79,47 +80,39 @@ func dateString(t time.Time) string {
 	return fmt.Sprintf("%d. %s", t.Day(), months[t.Month()])
 }
 
-// dateBox draws the date in white on a black box with a double border, in the bottom right corner.
+// dateBox draws the date in black on a white box with a double border, in the bottom right corner.
+// The box is sized to fit the text.
 func dateBox(dst draw.Image, now time.Time) error {
 	if labelFont == nil {
 		return errors.New("font not loaded")
 	}
 
-	bg, fg := image.Black, image.White
-	ruler := color.RGBA{0xdd, 0xdd, 0xdd, 0xff}
+	bg, fg, ruler := image.White, image.Black, image.Black
 
-	width, height, margin, padding := 300, 64, 16, 16
+	face := truetype.NewFace(labelFont, &truetype.Options{Size: 32, DPI: 72, Hinting: font.HintingFull})
+	defer face.Close()
+	d := &font.Drawer{Dst: dst, Src: fg, Face: face}
+
+	// Use the ink bounds rather than the advance so the padding is the same on both sides,
+	// and the height of a digit so the baseline doesn't move with letters that go below it.
+	text := dateString(now)
+	ink, _ := d.BoundString(text)
+	digit, _ := d.BoundString("0")
+	textWidth, capHeight := (ink.Max.X - ink.Min.X).Ceil(), (digit.Max.Y - digit.Min.Y).Ceil()
+
+	// The photo frame covers more of the panel's right edge than its bottom edge.
+	height, marginRight, marginBottom, padding := 64, 64, 32, 24
+	width := textWidth + 2*padding
 	b := dst.Bounds()
-	box := image.Rect(b.Max.X-(width+margin), b.Max.Y-(height+margin), b.Max.X-margin, b.Max.Y-margin)
+	box := image.Rect(b.Max.X-(width+marginRight), b.Max.Y-(height+marginBottom), b.Max.X-marginRight, b.Max.Y-marginBottom)
 	draw.Draw(dst, box, bg, image.Point{}, draw.Src)
 
-	drawSquare(dst,
-		box.Min.X+margin/2,
-		box.Min.Y+margin/2,
-		box.Dx()-margin,
-		box.Dy()-margin,
-		ruler)
-	drawSquare(dst,
-		box.Min.X+margin/4,
-		box.Min.Y+margin/4,
-		box.Dx()-margin/2,
-		box.Dy()-margin/2,
-		ruler)
+	drawSquare(dst, box.Min.X+8, box.Min.Y+8, box.Dx()-16, box.Dy()-16, ruler)
+	drawSquare(dst, box.Min.X+4, box.Min.Y+4, box.Dx()-8, box.Dy()-8, ruler)
 
-	size := 32.0
-	clip := image.Rect(box.Min.X+padding, box.Min.Y+padding, box.Max.X-padding, box.Max.Y-padding)
-	c := freetype.NewContext()
-	c.SetDPI(72)
-	c.SetFont(labelFont)
-	c.SetFontSize(size)
-	c.SetSrc(fg)
-	c.SetDst(dst)
-	c.SetClip(clip)
-	c.SetHinting(font.HintingFull)
-
-	x, y := clip.Min.X+margin, clip.Min.Y+int(c.PointToFixed(size-4)>>6)
-	_, err := c.DrawString(dateString(now), freetype.Pt(x, y))
-	return err
+	d.Dot = fixed.P(box.Min.X+padding, box.Min.Y+(height+capHeight)/2).Sub(fixed.Point26_6{X: ink.Min.X})
+	d.DrawString(text)
+	return nil
 }
 
 func drawSquare(dest draw.Image, x, y, width, height int, c color.Color) {
