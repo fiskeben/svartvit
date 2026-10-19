@@ -61,7 +61,7 @@ web app keep their names and paused state, and photos that have been removed fro
 
 ## Deploying
 
-`make deploy` builds for the Raspberry Pi, copies the binary to `pi@bilderamme:app/svartvit` and restarts the
+`make deploy` builds for the Raspberry Pi, copies the binary to `pi@svartvit:app/svartvit` and restarts the
 `svartvit` systemd service. Change the host in the `makefile` to deploy elsewhere.
 
 ## Testing

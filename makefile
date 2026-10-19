@@ -12,5 +12,5 @@ macos:
 
 # The binary can't be overwritten while it runs, so upload it next to the old one and rename it.
 deploy:linux
-	scp svartvit-linux-arm-$(version) pi@bilderamme:app/svartvit.new
-	ssh pi@bilderamme 'mv app/svartvit.new app/svartvit && sudo systemctl restart svartvit'
+	scp svartvit-linux-arm-$(version) pi@svartvit:app/svartvit.new
+	ssh pi@svartvit 'mv app/svartvit.new app/svartvit && sudo systemctl restart svartvit'
