@@ -10,5 +10,7 @@ linux:
 macos:
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -a -ldflags '-extldflags "-static" -X "main.BuildVersion=$(version)" -X "main.BuildTime=$(time)"' -o svartvit-macos-amd-64-$(version) .
 
+# The binary can't be overwritten while it runs, so upload it next to the old one and rename it.
 deploy:linux
-	scp svartvit-linux-arm-$(version) pi@bilderamme:app/svartvit
+	scp svartvit-linux-arm-$(version) pi@bilderamme:app/svartvit.new
+	ssh pi@bilderamme 'mv app/svartvit.new app/svartvit && sudo systemctl restart svartvit'
