@@ -1,19 +1,19 @@
-<div class="photo edit">
+<article class="photo edit{{if .Disabled}} disabled{{end}}">
     <form hx-put="/photo/{{.Id}}" hx-swap="outerHTML" hx-target="closest .photo">
-        <div>
-            <a href="{{.Path}}" target="_blank"><img src="{{.Path}}" alt="{{.Name}}" class="image" /></a>
-        </div>
-        <div>
-            <span>Name: </span>
-            <input type="text" name="name" value="{{.Name}}" />
-        </div>
-        <div>
-            <span>Disabled:</span>
+        <a href="{{.Path}}" target="_blank" class="plate">
+            <div class="halftone"><img src="{{.Path}}" alt="{{.Name}}" /></div>
+        </a>
+        <label class="field">
+            Name
+            <input type="text" name="name" value="{{.Name}}" autofocus />
+        </label>
+        <label class="field checkbox">
             <input type="checkbox" name="disabled" value="on" {{if .Disabled}}checked{{end}} />
-        </div>
-        <div class="icons">
-            <button type="submit"><img src="https://icons.getbootstrap.com/assets/icons/check-square.svg" alt="Save changes" class="icon" /> Save</button>
-            <button hx-get="/photo/{{.Id}}" hx-target="closest .photo"><img src="https://icons.getbootstrap.com/assets/icons/x-square.svg" alt="Discard changes" class="icon" /> Cancel</button>
+            Paused
+        </label>
+        <div class="actions">
+            <button type="submit" class="primary">Save</button>
+            <button type="button" hx-get="/photo/{{.Id}}" hx-target="closest .photo" hx-swap="outerHTML">Cancel</button>
         </div>
     </form>
-</div>
+</article>

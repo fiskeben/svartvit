@@ -50,13 +50,13 @@ built into the binary, so changes show up without rebuilding.
 
 Each photo has these buttons:
 
-- **Delete** removes the photo.
-- **Pause/play** leaves the photo out of the rotation, or puts it back.
+- **Delete** removes the photo, after asking you to confirm.
+- **Pause/Resume** leaves the photo out of the rotation, or puts it back.
 - **Edit** renames the photo.
 - **Preview** opens the photo as it will look on the frame, without changing the frame.
 - **Show on frame** shows the photo now. A refresh of the display takes about 30 seconds.
 
-If you copy photos into `<dir>/photos` yourself, open `/reindex` to add them to the web app. Photos already in the
+If you copy photos into `<dir>/photos` yourself, use *Reindex the photos folder* at the bottom of the web app (or open `/reindex`) to add them. Photos already in the
 web app keep their names and paused state, and photos that have been removed from the folder are dropped.
 
 ## Deploying

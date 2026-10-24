@@ -2,121 +2,448 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport"
-          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVARTVIT</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/htmx.org@2.0.0" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
     <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
     <style>
+        /* Only black and white. Every grey on the page is made of dots, like on the frame and in a newspaper. */
+        :root {
+            --ink: #000;
+            --paper: #fff;
+            --display: "Playfair Display", "Bodoni 72", Didot, Georgia, serif;
+            --text: Georgia, "Times New Roman", serif;
+            --mono: "SF Mono", Menlo, Consolas, monospace;
+            /* 50% dither: a checkerboard of single pixels. */
+            --dither: repeating-conic-gradient(var(--ink) 0 25%, var(--paper) 0 50%) 0 0 / 2px 2px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
         body {
-            padding: 1em 0 2em 0;
-            font-family: Helvetica Arial, sans-serif;
+            margin: 0;
+            padding: 1.5rem 1rem 3rem;
+            background: var(--paper);
+            color: var(--ink);
+            font-family: var(--text);
             font-size: 16px;
+            line-height: 1.4;
         }
 
         #main {
-            max-width: 80rem;
+            max-width: 72rem;
             margin: 0 auto;
         }
 
-        header {
-            border-bottom: 1rem solid #d0d0d0;
+        /* Halftone: a greyscale image under a grid of soft dots, pushed to pure black and white by the contrast filter.
+           Darker areas make the dots grow until they run together. */
+        .halftone {
+            position: relative;
+            overflow: hidden;
+            background: var(--paper);
+            filter: contrast(40);
+            transition: filter 0.4s;
         }
 
-        header h1 {
-            margin-bottom: -0.43rem;
+        .halftone::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, #000, #808080) 0 0 / var(--dot, 4px) var(--dot, 4px);
+            mix-blend-mode: screen;
+            pointer-events: none;
+            transition: opacity 0.4s;
         }
 
-        footer {
-            font-size: 68%;
-            margin-top: 2rem;
-            padding-top: 2rem;
+        /* Masthead */
+
+        .masthead {
             text-align: center;
-            border-top: 1px solid #d0d0d0;
         }
 
-        #upload-frame {
-            width: 40rem;
-            margin: 1rem auto;
-            padding: 1rem;
-            border: 1px solid #f0f0f0;
+        .dateline {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.35rem 0;
+            border-top: 3px solid var(--ink);
+            border-bottom: 1px solid var(--ink);
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
         }
 
-        #photos {
+        .masthead h1 {
+            margin: 0.5rem 0 0.25rem;
+            font-family: var(--display);
+            font-weight: 900;
+            font-size: clamp(3rem, 14vw, 8rem);
+            line-height: 1;
+            letter-spacing: 0.02em;
+        }
+
+        .masthead .tagline {
+            margin: 0 0 0.5rem;
+            font-style: italic;
+        }
+
+        .masthead .rule {
+            height: 2rem;
+            border-top: 3px double var(--ink);
+            --dot: 5px;
+        }
+
+        .masthead .rule::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            /* Dark at the top, fading to white. */
+            background: linear-gradient(#000, #808080);
+        }
+
+        /* Upload */
+
+        .upload {
             display: flex;
             flex-wrap: wrap;
-            justify-content: center;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem 1.5rem;
+            margin: 2rem 0;
+            padding: 1rem 1.25rem;
+            border: 1px solid var(--ink);
+            outline: 1px solid var(--ink);
+            outline-offset: 3px;
+        }
+
+        .upload h2 {
+            margin: 0;
+            font-family: var(--display);
+            font-size: 1.5rem;
+            font-style: italic;
+        }
+
+        .upload form {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .upload input[type="file"] {
+            max-width: 100%;
+            font: inherit;
+            font-size: 0.875rem;
+        }
+
+        .upload input[type="file"]::file-selector-button {
+            margin-right: 0.75rem;
+            padding: 0.4rem 0.75rem;
+            border: 1px solid var(--ink);
+            background: var(--paper);
+            color: var(--ink);
+            font: inherit;
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+
+        .upload input[type="file"]::file-selector-button:hover {
+            background: var(--ink);
+            color: var(--paper);
+        }
+
+        .upload progress {
+            appearance: none;
+            width: 10rem;
+            height: 0.75rem;
+            border: 1px solid var(--ink);
+            background: var(--dither);
+        }
+
+        .upload progress[value="0"] {
+            display: none;
+        }
+
+        .upload progress::-webkit-progress-bar {
+            background: var(--dither);
+        }
+
+        .upload progress::-webkit-progress-value {
+            background: var(--ink);
+        }
+
+        .upload progress::-moz-progress-bar {
+            background: var(--ink);
+        }
+
+        #upload-message:empty {
+            display: none;
+        }
+
+        /* Buttons */
+
+        button,
+        .button {
+            display: inline-block;
+            padding: 0.4rem 0.6rem;
+            border: 1px solid transparent;
+            background: none;
+            color: var(--ink);
+            font: inherit;
+            font-size: 0.75rem;
+            line-height: 1.2;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        button:hover,
+        .button:hover {
+            border-color: var(--ink);
+        }
+
+        button.primary {
+            border-color: var(--ink);
+            background: var(--ink);
+            color: var(--paper);
+        }
+
+        button.primary:hover {
+            background: var(--paper);
+            color: var(--ink);
+        }
+
+        button.danger:hover {
+            border-color: var(--ink);
+            background: var(--ink);
+            color: var(--paper);
+        }
+
+        :focus-visible {
+            outline: 2px solid var(--ink);
+            outline-offset: 2px;
+        }
+
+        button.htmx-request {
+            background: var(--dither);
+            color: var(--ink);
+            cursor: progress;
+        }
+
+        /* Photos */
+
+        #photos {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+            align-items: start;
+            gap: 2.5rem 2rem;
+        }
+
+        .empty {
+            grid-column: 1 / -1;
+            margin: 2rem 0;
+            text-align: center;
+            font-style: italic;
         }
 
         .photo {
-            margin: 1rem;
-            padding: 1rem;
-            border: 1px solid #d0d0f0;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--ink);
         }
 
-        .disabled {
-            filter: grayscale(100%);
-            background-color: #fdfdfd;
+        .plate {
+            position: relative;
+            display: block;
+            border: 1px solid var(--ink);
+            color: var(--ink);
         }
 
-        .image {
-            width: 12rem;
-            height: auto;
-            border: 1px solid #909090;
+        .plate img {
+            display: block;
+            width: 100%;
+            aspect-ratio: 5 / 3;
+            object-fit: cover;
+            /* Half brightness lets the dots cover the whole range from white to solid black. */
+            filter: grayscale(1) brightness(0.5);
+            transition: filter 0.4s;
         }
 
-        .icons {
+        /* Hovering develops the halftone into the actual photo. */
+        .plate:hover .halftone,
+        .plate:focus-visible .halftone {
+            filter: contrast(1);
+        }
+
+        .plate:hover .halftone::after,
+        .plate:focus-visible .halftone::after {
+            opacity: 0;
+        }
+
+        .plate:hover img,
+        .plate:focus-visible img {
+            filter: grayscale(1) brightness(1);
+        }
+
+        /* Paused photos are printed faded: the darkest areas only get mid-sized dots. */
+        .disabled .plate img {
+            filter: grayscale(1) contrast(0.4) brightness(0.72);
+        }
+
+        .stamp {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            z-index: 1;
+            transform: translate(-50%, -50%) rotate(-6deg);
+            padding: 0.2rem 0.75rem;
+            border: 3px double var(--ink);
+            background: var(--paper);
+            font-family: var(--display);
+            font-size: 1.25rem;
+            font-weight: 900;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .caption {
+            margin: 0.6rem 0 0.4rem;
+            font-family: var(--display);
+            font-size: 1.25rem;
+            font-weight: 700;
+            line-height: 1.2;
+            overflow-wrap: anywhere;
+        }
+
+        .actions,
+        .actions div {
             display: flex;
-            justify-content: right;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 0.25rem;
         }
 
-        .icon {
-            width: 2rem;
-            height: 2rem;
-            margin: 0.5rem;
-            cursor: pointer;
+        .actions {
+            margin: 0 -0.6rem;
         }
 
-        .photo form {
+        .output:not(:empty) {
+            margin-top: 0.5rem;
+            padding-top: 0.5rem;
+            border-top: 1px dotted var(--ink);
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            overflow-wrap: anywhere;
+        }
+
+        .output p {
+            margin: 0;
+        }
+
+        /* Editing */
+
+        .field {
             display: flex;
             flex-direction: column;
-            font-size: 80%;
+            gap: 0.2rem;
+            margin-top: 0.75rem;
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
         }
 
-        .photo form div {
-            margin: 0.2rem 0;
-        }
-
-        .photo form input[type="text"] {
-            margin: 0.5rem 0;
-        }
-
-        .photo form button {
-            display: flex;
-            align-items: center;
-            background: none;
+        .field input[type="text"] {
+            padding: 0.3rem 0;
             border: none;
+            border-bottom: 1px solid var(--ink);
+            border-radius: 0;
+            background: none;
+            font-family: var(--display);
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: normal;
+            text-transform: none;
         }
 
-        .photo form .icon {
-            margin: 0.5rem;
+        .field input[type="text"]:focus {
+            outline: none;
+            border-bottom-width: 3px;
+            margin-bottom: -2px;
+        }
+
+        .field.checkbox {
+            flex-direction: row;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .field input[type="checkbox"] {
+            appearance: none;
+            width: 1rem;
+            height: 1rem;
+            margin: 0;
+            border: 1px solid var(--ink);
+            background: var(--paper);
             cursor: pointer;
         }
+
+        .field input[type="checkbox"]:checked {
+            background: var(--ink);
+            box-shadow: inset 0 0 0 2px var(--paper);
+        }
+
+        .edit .actions {
+            justify-content: flex-start;
+            margin: 1rem 0 0;
+        }
+
+        /* Footer */
+
+        footer {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 0.5rem 1rem;
+            margin-top: 3rem;
+            padding-top: 0.5rem;
+            border-top: 3px double var(--ink);
+            font-size: 0.75rem;
+            font-style: italic;
+        }
+
+        footer a {
+            color: inherit;
+        }
     </style>
-    <title>SVARTVIT</title>
 </head>
 <body>
 <div id="main">
-    <header>
-        <h1>SVARTVIT</h1>
+    <header class="masthead">
+        <div class="dateline">
+            <span>{{with len .Images}}{{.}} photo{{if ne . 1}}s{{end}}{{else}}No photos{{end}}</span>
+            <span id="today"></span>
+        </div>
+        <h1>Svartvit</h1>
+        <p class="tagline">All the photos that are fit to frame</p>
+        <div class="rule halftone" aria-hidden="true"></div>
+        <script>
+            document.getElementById('today').textContent = new Date().toLocaleDateString('en-GB', {weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'});
+        </script>
     </header>
 
-    <div id="upload-frame">
-        <p>Add a new photo to the frame:</p>
+    <section class="upload">
+        <h2>Submit a photograph</h2>
         <form id="upload" hx-post="/upload" hx-encoding="multipart/form-data" hx-target="#upload-message">
-            <input type="file" name="photo" id="photo" />
-            <button type="submit">Upload</button>
-            <progress id='progress' value='0' max='100'></progress>
+            <input type="file" name="photo" id="photo" accept="image/jpeg,image/png" required />
+            <button type="submit" class="primary">Upload</button>
+            <progress id="progress" value="0" max="100"></progress>
         </form>
         <script>
             htmx.on('#upload', 'htmx:xhr:progress', function(evt) {
@@ -124,16 +451,19 @@
             });
         </script>
         <div id="upload-message"></div>
-    </div>
+    </section>
 
-    <div id="photos">
+    <main id="photos">
         {{range .Images}}
             {{ template "photo" . }}
+        {{else}}
+            <p class="empty">Nothing on the press yet. Upload a photo to get started.</p>
         {{end}}
-    </div>
+    </main>
 
     <footer>
-        It's a photo frame!
+        <span>It's a photo frame!</span>
+        <a href="/reindex">Reindex the photos folder</a>
     </footer>
 </div>
 </body>
